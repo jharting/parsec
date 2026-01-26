@@ -6,7 +6,10 @@
 //   - Console API tokens (scope contains "api.console")
 //
 // Based on: https://github.com/RedHatInsights/insights-3scale
+//
+// Skip background job assertions (handled by user_id_identity.cel)
 
+subject.trust_domain == "background-jobs.internal" ? {} : (
 isServiceAccountToken(subject.claims) ? {
   // Service Account Token Branch
   "org_id": "rh-org-id" in subject.claims ? subject.claims["rh-org-id"] :
@@ -53,4 +56,4 @@ isServiceAccountToken(subject.claims) ? {
     // This ensures we only handle the two specific token types
     "error": "unsupported_token_type"
   }
-)
+))

@@ -19,7 +19,7 @@ exchange_server:
 
 # Trust store configuration
 trust_store:
-  type: stub_store
+  type: filtered_store
   validators:
     - name: redhat-sso
       type: jwt_validator
@@ -28,8 +28,30 @@ trust_store:
       trust_domain: "https://sso.redhat.com/auth/realms/redhat-external"
       refresh_interval: "15m"
 
-# Data sources for token enrichment (none configured by default)
-data_sources: []
+    # User-ID assertion validator for background jobs
+    - name: user-id-assertion
+      type: json_validator
+      trust_domain: "background-jobs.internal"
+
+  # Restrict user-id-assertion to authenticated actors only
+  filter:
+    type: cel
+    script: |
+      validator_name == "user-id-assertion"
+        ? has(actor.subject) && actor.subject != ""
+        : true
+
+# Data sources for token enrichment
+data_sources:
+  - name: user_lookup
+    type: lua
+    script_file: ./configs/scripts/user_lookup.lua
+    config:
+      api_endpoint: "https://user-api.internal"
+      api_key: "${USER_API_KEY}"
+    caching:
+      type: in_memory
+      ttl: 5m
 
 # Token issuers
 issuers:
@@ -52,6 +74,11 @@ issuers:
     type: rh_identity
     # Claim mappers build the identity structure
     claim_mappers:
+      # Use user-id-identity mapper for background job assertions
+      - type: cel
+        name: user-id-identity-mapper
+        script_file: ./configs/scripts/user_id_identity.cel
+      # Use redhat-identity mapper for regular SSO tokens
       - type: cel
         name: redhat-identity-mapper
         script_file: ./configs/scripts/redhat_identity.cel

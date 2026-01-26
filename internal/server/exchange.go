@@ -121,11 +121,10 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.TokenExchan
 
 	// 5. Validate subject_token
 	// Create strongly-typed credential based on token type
-	// In production, we'd parse the token_type to determine the specific credential type
-	// For now, we'll treat all as bearer tokens
-	// TODO: Parse subject_token_type to determine specific credential type (JWT, OIDC, etc.)
-	cred := &trust.BearerCredential{
-		Token: req.SubjectToken,
+	cred, err := createSubjectCredential(req.SubjectToken, req.SubjectTokenType)
+	if err != nil {
+		probe.SubjectTokenValidationFailed(err)
+		return nil, fmt.Errorf("invalid subject token: %w", err)
 	}
 
 	// Validate subject credential against filtered trust store
@@ -177,4 +176,50 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.TokenExchan
 		ExpiresIn:       int64(token.ExpiresAt.Sub(token.IssuedAt).Seconds()),
 		Scope:           req.Scope,
 	}, nil
+}
+
+// userIDAssertion represents the structure of a user-id assertion
+type userIDAssertion struct {
+	UserID string `json:"user_id"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// createSubjectCredential creates the appropriate credential based on subject_token_type
+func createSubjectCredential(subjectToken, subjectTokenType string) (trust.Credential, error) {
+	switch subjectTokenType {
+	case "urn:redhat:params:oauth:token-type:user-id-assertion":
+		// Decode base64 JSON assertion
+		rawJSON, err := base64.StdEncoding.DecodeString(subjectToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode user-id-assertion: %w", err)
+		}
+
+		// Parse and validate
+		var assertion userIDAssertion
+		if err := json.Unmarshal(rawJSON, &assertion); err != nil {
+			return nil, fmt.Errorf("failed to parse user-id-assertion: %w", err)
+		}
+		if assertion.UserID == "" {
+			return nil, fmt.Errorf("user_id is required in user-id-assertion")
+		}
+
+		// Convert to Result structure for JSONValidator
+		result := trust.Result{
+			Subject:     assertion.UserID,
+			TrustDomain: "background-jobs.internal",
+			Claims: claims.Claims{
+				"user_id": assertion.UserID,
+				"reason":  assertion.Reason,
+			},
+		}
+		resultJSON, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal user-id-assertion: %w", err)
+		}
+		return &trust.JSONCredential{RawJSON: resultJSON}, nil
+
+	default:
+		// Existing behavior for JWT/bearer tokens
+		return &trust.BearerCredential{Token: subjectToken}, nil
+	}
 }

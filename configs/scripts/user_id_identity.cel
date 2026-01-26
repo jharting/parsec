@@ -1,0 +1,41 @@
+// User-ID Assertion Identity Transformation
+//
+// Transforms user lookup data into Red Hat identity format for background job impersonation.
+// Used when subject_token_type is "urn:redhat:params:oauth:token-type:user-id-assertion"
+//
+// Only applies when trust_domain is "background-jobs.internal"
+
+subject.trust_domain == "background-jobs.internal" ? {
+  "account_number": has(datasource("user_lookup").account_number) ?
+                    safeToString(datasource("user_lookup").account_number) : "",
+  "org_id": has(datasource("user_lookup").org_id) ?
+            safeToString(datasource("user_lookup").org_id) : "",
+  "type": "User",
+  "user": {
+    "user_id": has(datasource("user_lookup").id) ?
+               safeToString(datasource("user_lookup").id) : subject.claims.user_id,
+    "username": has(datasource("user_lookup").username) ?
+                datasource("user_lookup").username : "",
+    "email": has(datasource("user_lookup").email) ?
+             datasource("user_lookup").email : "",
+    "first_name": has(datasource("user_lookup").first_name) ?
+                  datasource("user_lookup").first_name : "",
+    "last_name": has(datasource("user_lookup").last_name) ?
+                 datasource("user_lookup").last_name : "",
+    "is_active": has(datasource("user_lookup").is_active) ?
+                 datasource("user_lookup").is_active : true,
+    "is_org_admin": has(datasource("user_lookup").is_org_admin) ?
+                    datasource("user_lookup").is_org_admin : false,
+    "is_internal": has(datasource("user_lookup").is_internal) ?
+                   datasource("user_lookup").is_internal : false,
+    "locale": has(datasource("user_lookup").locale) ?
+              datasource("user_lookup").locale : "en_US"
+  },
+  "internal": {
+    "org_id": has(datasource("user_lookup").org_id) ?
+              safeToString(datasource("user_lookup").org_id) : "",
+    "cross_access": false,
+    "impersonated_by": has(actor.subject) ? actor.subject : "",
+    "impersonation_reason": has(subject.claims.reason) ? subject.claims.reason : ""
+  }
+} : {}
